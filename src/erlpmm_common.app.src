@@ -1,0 +1,6 @@
+{application,erlpmm_common,
+             [{registered,[]},
+              {description,"pmm common lib"},
+              {vsn,"1.0.0"},
+              {applications,[kernel,stdlib]},
+              {modules,[pmm_conf]}]}.
