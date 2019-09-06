@@ -14,8 +14,9 @@ test1_local_config_empty_test() ->
 .
 
 test2_local_config_is_not_empty_test() ->
-    PmmConfPid = set_up_config([{strip_leading_zero, true}]),
-    ?assertEqual(true, pmm_conf:get(strip_leading_zero)),
+    PmmConfPid = set_up_config([{key_from_local_config, value_from_local_config}]),
+    ?assertEqual(value_from_local_config, pmm_conf:get(key_from_local_config)),
+    ?assertEqual(false, pmm_conf:get(strip_leading_zero)),
     ?assertEqual("999", pmm_conf:get(country_code)),
     pmm_conf:stop(),
     wait_for_exit(PmmConfPid)

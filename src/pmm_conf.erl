@@ -120,7 +120,8 @@ handle_cast(stop, St) ->
 
 handle_cast({temporary_set, Key, Value}, St) ->
     application:set_env(St#st.app, Key, Value),
-    {noreply, St};
+    NewLocal = proplists:delete(Key, St#st.local_settings),
+    {noreply, St#st{local_settings = NewLocal}};
 
 handle_cast({reload, App}, St) ->
     
