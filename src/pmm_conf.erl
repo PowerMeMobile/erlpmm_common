@@ -83,7 +83,7 @@ log_app_env(App) ->
 %% -------------------------------------------------------------------------
 
 init([{App, KeysToPreserve, LoggerInfo, LoggerErr}]) ->
-    LoggerInfo:info("config: initializing ~s", [App]),
+    LoggerInfo("config: initializing ~s", [App]),
     LocalSettings = load_local_config_settings(App, LoggerInfo, LoggerErr),
     init([{App, KeysToPreserve, LoggerInfo, LoggerErr}, LocalSettings]);
 
