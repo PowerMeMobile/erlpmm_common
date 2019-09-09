@@ -29,7 +29,10 @@
       app :: atom(),
       keysToPreserve :: list(),
 	  local_settings :: list(),
-	  cron_jobs :: list(reference)
+	  cron_jobs :: list(reference),
+      loggerInfo :: fun(),
+      loggerErr :: fun()
+
 }).
 
 -define(gv(Key, List), proplists:get_value(Key, List)).
@@ -40,8 +43,8 @@
 %% -------------------------------------------------------------------------
 
 -spec start_link({atom(), list()}) -> {'ok', pid()} | {'error', any()}.
-start_link({App, KeysToPreserve}) ->
-    case gen_server:start_link({local, ?MODULE}, ?MODULE, [{App, KeysToPreserve}], []) of
+start_link({App, KeysToPreserve, LoggerInfo, LoggerErr}) ->
+    case gen_server:start_link({local, ?MODULE}, ?MODULE, [{App, KeysToPreserve, LoggerInfo, LoggerErr}], []) of
 	{ok, Pid} -> {ok, Pid};
 	{error, {already_started, Pid}} -> 
 	    link(Pid),
@@ -49,8 +52,8 @@ start_link({App, KeysToPreserve}) ->
     end.
 
 -spec start_link({atom(), list()}, list()) -> {'ok', pid()} | {'error', any()}.
-start_link({App, KeysToPreserve}, LocalSettings) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [{App, KeysToPreserve}, LocalSettings], []).
+start_link({App, KeysToPreserve, LoggerInfo, LoggerErr}, LocalSettings) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [{App, KeysToPreserve, LoggerInfo, LoggerErr}, LocalSettings], []).
 
 -spec stop() -> 'ok'.
 stop() ->
@@ -73,31 +76,32 @@ reload(App) ->
     gen_server:cast(?MODULE, {reload, App}).
 
 log_app_env(App) ->
-    [lager:info("env ~p -> ~p -> ~p\n", [App, K, V])
-        || {K, V} <- lists:sort(application:get_all_env(App))].
+    gen_server:cast(?MODULE, {log_app_env, App}).
 
 %% -------------------------------------------------------------------------
 %% gen_server callbacks
 %% -------------------------------------------------------------------------
 
-init([{App, KeysToPreserve}]) ->
-    lager:info("config: initializing ~s", [App]),
-    LocalSettings = load_local_config_settings(App),
-    init([{App, KeysToPreserve}, LocalSettings]);
+init([{App, KeysToPreserve, LoggerInfo, LoggerErr}]) ->
+    LoggerInfo:info("config: initializing ~s", [App]),
+    LocalSettings = load_local_config_settings(App, LoggerInfo, LoggerErr),
+    init([{App, KeysToPreserve, LoggerInfo, LoggerErr}, LocalSettings]);
 
-init([{App, KeysToPreserve}, LocalSettings]) ->
+init([{App, KeysToPreserve, LoggerInfo, LoggerErr}, LocalSettings]) ->
     CronJobs = apply_configured_cron_tab(App, LocalSettings),
     {ok, #st{
              app = App,
              keysToPreserve = KeysToPreserve, 
              local_settings = LocalSettings, 
-             cron_jobs = CronJobs
+             cron_jobs = CronJobs,
+             loggerInfo = LoggerInfo,
+             loggerErr = LoggerErr
             }
     }.
 
 terminate(Reason, St) ->
     cancel_cron_jobs(St#st.cron_jobs),
-    lager:info("config: terminated (~w)", [Reason]).
+    logInfo("config: terminated (~w)", [Reason], St).
 
 handle_call({get, Key}, _From, St) ->
     LocalResult = check_in_local_settings(Key, St#st.local_settings),
@@ -148,8 +152,8 @@ handle_cast({reload, App}, St) ->
     NewLocalSettings =
 	case App of
 	    AppSt -> 
-		Loaded = load_local_config_settings(St#st.app),
-		log_local_settings_change(St#st.local_settings, Loaded),
+		Loaded = load_local_config_settings(St#st.app, St#st.loggerInfo, St#st.loggerErr),
+		log_local_settings_change(St#st.local_settings, Loaded, St),
 		Loaded;
 	    _ -> St#st.local_settings
 	end,
@@ -159,7 +163,10 @@ handle_cast({reload, App}, St) ->
 	    AppSt -> reapply_configured_cron_tab(St);
 	    _ -> St#st.cron_jobs
 	end,	
-    {noreply, St#st{local_settings = NewLocalSettings, cron_jobs = NewCronJobs}}.
+    {noreply, St#st{local_settings = NewLocalSettings, cron_jobs = NewCronJobs}};
+
+handle_cast({log_app_env, App}, St) ->
+    [logInfo("env ~p -> ~p -> ~p\n", [App, K, V], St) || {K, V} <- lists:sort(application:get_all_env(App))].
 
 handle_info(Info, St) ->
     {stop, {unexpected_info, Info}, St}.
@@ -176,17 +183,17 @@ internal_get(App, Key, Default, LocalSettings) ->
 	LocalResult -> LocalResult
     end.
 
-load_local_config_settings(App) ->
+load_local_config_settings(App, LogInfo, LogError) ->
     FileName = application:get_env(App, local_config_path, "etc/app_local.config"),
     case file:consult(FileName) of
 	{ok, PropListInFile} -> 
-	    lager:info("config: local config from ~s loaded successfully", [FileName]),
+	    LogInfo("config: local config from ~s loaded successfully", [FileName]),
 	    PropListInFile;
 	{error, enoent} ->
-	    lager:info("config: local config at ~s is abscent", [FileName]),
+	    LogInfo("config: local config at ~s is abscent", [FileName]),
 	    [];
 	{error, Reason} ->
-	    lager:error("config: can't read local config file ~s (~w)", [FileName, Reason]),
+	    LogError("config: can't read local config file ~s (~w)", [FileName, Reason]),
 	    []
     end.
 
@@ -204,18 +211,18 @@ apply_configured_cron_tab(App, LocalSettings) ->
 cancel_cron_jobs(JobRefs) ->
     lists:foreach(fun (JobRef) -> erlcron:cancel(JobRef) end, JobRefs).
 
-log_local_settings_change(Before, After) ->
+log_local_settings_change(Before, After, St) ->
     LogChanged =
-	fun (Key) -> lager:info("~w changed from ~w to ~w in local_config",
-				[Key, ?gv(Key, Before), ?gv(Key, After)])
+	fun (Key) -> logInfo("~w changed from ~w to ~w in local_config",
+				[Key, ?gv(Key, Before), ?gv(Key, After)], St)
 	end,
     LogRemoved =
-	fun (Key) -> lager:info("~w (~w) was removed from local config",
-				[Key, ?gv(Key, Before)])
+	fun (Key) -> logInfo("~w (~w) was removed from local config",
+				[Key, ?gv(Key, Before)], St)
 	end,
     LogAdded = 
-	fun (Key) -> lager:info("~w (~w) was added to local config",
-				[Key, ?gv(Key, After)])
+	fun (Key) -> logInfo("~w (~w) was added to local config",
+				[Key, ?gv(Key, After)], St)
 	end,
     {Changed, Removed, Added} = get_changed_settings(Before, After),
     lists:foreach(LogChanged, Changed),
@@ -236,4 +243,12 @@ get_changed_settings(Before, After) ->
     Added = lists:filter(KeyIsAdded, Keys),
     {Changed, Removed, Added}.
 				   
-    
+logInfo(Str, Params, St) ->
+    Log = St#st.loggerInfo,
+    Log(Str, Params).
+
+%% logError(Str, Params, St) -> 
+%%     Log = St#st.loggerInfo,
+%% Log(Str, Params).
+
+

@@ -1,7 +1,6 @@
 -module(pmm_conf_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--compile({parse_transform, lager_transform}).
 
 test1_local_config_empty_test() ->
     PmmConfPid = set_up_config([]),
@@ -42,7 +41,8 @@ test3_get_config_changed_fun_test() ->
 		 {[b, c], [], [d]}).
 
 set_up_config(LocalSettings) ->
-    {ok, Pid} = pmm_conf:start_link({funnel, []}, LocalSettings),
+    LogFun = fun(Str, Params) -> io:format(Str, Params) end,
+    {ok, Pid} = pmm_conf:start_link({funnel, [], LogFun, LogFun},LocalSettings),
     pmm_conf:temporary_set(strip_leading_zero, false),
     pmm_conf:temporary_set(country_code, "999"),
     Pid.
