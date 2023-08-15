@@ -28,8 +28,8 @@
 -record(st, {
       app :: atom(),
       keysToPreserve :: list(),
-	  local_settings :: list(),
-	  cron_jobs :: list(reference),
+	    local_settings :: list(),
+	    cron_jobs :: list(reference),
       loggerInfo :: fun(),
       loggerErr :: fun()
 
@@ -45,10 +45,10 @@
 -spec start_link({atom(), list()}) -> {'ok', pid()} | {'error', any()}.
 start_link({App, KeysToPreserve, LoggerInfo, LoggerErr}) ->
     case gen_server:start_link({local, ?MODULE}, ?MODULE, [{App, KeysToPreserve, LoggerInfo, LoggerErr}], []) of
-	{ok, Pid} -> {ok, Pid};
-	{error, {already_started, Pid}} -> 
-	    link(Pid),
-	    {ok, Pid}
+	      {ok, Pid} -> {ok, Pid};
+	      {error, {already_started, Pid}} ->
+	        link(Pid),
+	        {ok, Pid}
     end.
 
 -spec start_link({atom(), list()}, list()) -> {'ok', pid()} | {'error', any()}.
@@ -166,7 +166,15 @@ handle_cast({reload, App}, St) ->
     {noreply, St#st{local_settings = NewLocalSettings, cron_jobs = NewCronJobs}};
 
 handle_cast({log_app_env, App}, St) ->
-    [logInfo("env ~p -> ~p -> ~p\n", [App, K, V], St) || {K, V} <- lists:sort(application:get_all_env(App))].
+    [ begin
+        case check_in_local_settings(K, St#st.local_settings) of
+            undefined ->
+              logInfo("env ~p -> ~p: ~p\n", [App, K, V], St);
+            LocalResult ->
+              logInfo("env ~p -> ~p: ~p, app_local: ~p\n", [App, K, V, LocalResult], St)
+        end
+      end
+      || {K, V} <- lists:sort(application:get_all_env(App))].
 
 handle_info(Info, St) ->
     {stop, {unexpected_info, Info}, St}.
@@ -179,8 +187,8 @@ code_change(_OldVsn, St, _Extra) ->
 %% -------------------------------------------------------------------------
 internal_get(App, Key, Default, LocalSettings) ->
     case check_in_local_settings(Key, LocalSettings) of
-	undefined -> application:get_env(App, Key, Default);
-	LocalResult -> LocalResult
+	    undefined -> application:get_env(App, Key, Default);
+	    LocalResult -> LocalResult
     end.
 
 load_local_config_settings(App, LogInfo, LogError) ->
