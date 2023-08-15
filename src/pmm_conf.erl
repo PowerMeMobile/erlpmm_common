@@ -174,7 +174,8 @@ handle_cast({log_app_env, App}, St) ->
               logInfo("env ~p -> ~p: ~p, app_local: ~p\n", [App, K, V, LocalResult], St)
         end
       end
-      || {K, V} <- lists:sort(application:get_all_env(App))].
+      || {K, V} <- lists:sort(application:get_all_env(App))],
+      {noreply, St}.
 
 handle_info(Info, St) ->
     {stop, {unexpected_info, Info}, St}.
